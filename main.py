@@ -21,3 +21,8 @@ app.include_router(drop.router, tags=["Drop"])
 @app.get("/")
 async def root():
     return {"status": "ok"}
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
