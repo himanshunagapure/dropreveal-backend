@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+razorpay
+python-dotenv
+sqlalchemy
+pydantic
+httpx
+python-jose
+psycopg[binary]
+ngrok
