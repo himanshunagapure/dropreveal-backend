@@ -16,15 +16,16 @@ def unlock(db: Session, order_id: int) -> str:
     return token
 
 def verify_token(db: Session, token: str) -> bool:
+    """
+    Checks whether a drop token exists and has not expired.
+    Tokens are valid for their full 24-hour window and may be re-validated
+    on every modal open (the viewer should not lose access mid-session).
+    """
     db_token = db.query(DropToken).filter_by(token=token, used=False).first()
     if not db_token:
         return False
     if db_token.expires_at < datetime.utcnow():
         return False
-    
-    # Mark token as used
-    db_token.used = True
-    db.commit()
     return True
 
 def get_drop_content():

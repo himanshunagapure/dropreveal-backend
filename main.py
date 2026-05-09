@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import orders, payments, webhooks, drop
+from routes import orders, payments, webhooks, drop, payouts
 from config import FRONTEND_URL
 
 app = FastAPI(title="Razorpay Drop Reveal API")
@@ -17,6 +17,7 @@ app.include_router(orders.router, tags=["Orders"])
 app.include_router(payments.router, tags=["Payments"])
 app.include_router(webhooks.router, tags=["Webhooks"])
 app.include_router(drop.router, tags=["Drop"])
+app.include_router(payouts.router, tags=["Payouts"])
 
 @app.get("/")
 async def root():

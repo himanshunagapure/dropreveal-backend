@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Float
 from sqlalchemy.orm import sessionmaker, declarative_base
 from datetime import datetime
 from config import DATABASE_URL
@@ -23,6 +23,9 @@ class Order(Base):
     razorpay_order_id = Column(String, unique=True, index=True)
     amount = Column(Integer)
     status = Column(String)  # 'created', 'paid', 'failed'
+    reel_id = Column(String, nullable=True)        # Supabase reel UUID
+    creator_id = Column(String, nullable=True)     # Supabase creator UUID
+    commission_rate = Column(Float, nullable=True) # 0.20 free plan, 0.10 pro plan
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class DropToken(Base):
