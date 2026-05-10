@@ -1,4 +1,5 @@
 import hashlib
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 import razorpay
@@ -10,6 +11,7 @@ from models.schemas import VerifyPaymentRequest, RestoreAccessRequest, VerifyPas
 from services import razorpay_service, drop_service
 from config import RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 rz_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
@@ -18,6 +20,8 @@ supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 @router.post("/verify-payment")
 async def verify_payment(data: VerifyPaymentRequest, db: Session = Depends(get_db)):
+    logger.info("verify-payment | order_id=%s payment_id=%s", data.razorpay_order_id, data.razorpay_payment_id)
+
     # 1. Verify HMAC signature
     is_valid = razorpay_service.verify_signature(
         data.razorpay_order_id,
@@ -25,24 +29,34 @@ async def verify_payment(data: VerifyPaymentRequest, db: Session = Depends(get_d
         data.razorpay_signature,
     )
     if not is_valid:
+        logger.warning("Invalid signature | order_id=%s payment_id=%s", data.razorpay_order_id, data.razorpay_payment_id)
         raise HTTPException(status_code=400, detail="Invalid payment signature")
 
     # 2. Mark order paid
     order = db.query(Order).filter_by(razorpay_order_id=data.razorpay_order_id).first()
     if not order:
+        logger.error("Order not found in DB | order_id=%s", data.razorpay_order_id)
         raise HTTPException(status_code=404, detail="Order not found")
     order.status = "paid"
     db.commit()
+    logger.info("Order marked paid | order_id=%s reel_id=%s", data.razorpay_order_id, order.reel_id)
 
     # 3. Generate drop token
-    drop_token = drop_service.unlock(db, order.id)
+    try:
+        drop_token = drop_service.unlock(db, order.id)
+        logger.info("Drop token generated | order_id=%s", data.razorpay_order_id)
+    except Exception as e:
+        logger.error("drop_service.unlock failed | order_id=%s error=%s", data.razorpay_order_id, e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Could not generate drop token: {e}")
 
     # 4. Fetch viewer email + phone from Razorpay — captured automatically during checkout
     try:
         payment_details = rz_client.payment.fetch(data.razorpay_payment_id)
         viewer_email = (payment_details.get("email") or "").lower().strip() or None
         viewer_phone = payment_details.get("contact") or None
-    except Exception:
+        logger.info("Fetched viewer contact | email=%s phone=%s", viewer_email, viewer_phone)
+    except Exception as e:
+        logger.warning("Could not fetch payment details from Razorpay | payment_id=%s error=%s", data.razorpay_payment_id, e)
         viewer_email = None
         viewer_phone = None
 
@@ -69,8 +83,11 @@ async def verify_payment(data: VerifyPaymentRequest, db: Session = Depends(get_d
                         "payment_id": data.razorpay_payment_id,
                     },
                 })
-        except Exception:
-            pass  # Transfer failure is non-fatal — payout can be retried manually
+                logger.info("Creator transfer initiated | creator_id=%s amount_paise=%s", order.creator_id, creator_share_paise)
+            else:
+                logger.info("No fund_account_id for creator | creator_id=%s — skipping transfer", order.creator_id)
+        except Exception as e:
+            logger.warning("Creator transfer failed (non-fatal) | creator_id=%s error=%s", order.creator_id, e, exc_info=True)
 
     # 6. Record unlock in Supabase reel_unlocks
     viewer_hash = hashlib.sha256(data.razorpay_payment_id.encode()).hexdigest()
@@ -85,8 +102,9 @@ async def verify_payment(data: VerifyPaymentRequest, db: Session = Depends(get_d
             "drop_token": drop_token,
             "amount_paid_inr": order.amount / 100,
         }).execute()
-    except Exception:
-        pass  # Non-fatal — webhook acts as backup
+        logger.info("reel_unlocks row inserted | reel_id=%s payment_id=%s", order.reel_id, data.razorpay_payment_id)
+    except Exception as e:
+        logger.warning("reel_unlocks insert failed (non-fatal) | reel_id=%s error=%s", order.reel_id, e, exc_info=True)
 
     return {"success": True, "drop_token": drop_token}
 
@@ -94,18 +112,26 @@ async def verify_payment(data: VerifyPaymentRequest, db: Session = Depends(get_d
 @router.post("/restore-access")
 async def restore_access(data: RestoreAccessRequest):
     """Cross-device recovery: looks up an existing paid unlock by reel + email."""
-    result = (
-        supabase_client.table("reel_unlocks")
-        .select("drop_token")
-        .eq("reel_id", data.reel_id)
-        .eq("viewer_email", data.email.lower().strip())
-        .eq("unlock_type", "paid")
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
-    )
+    logger.info("restore-access | reel_id=%s email=%s", data.reel_id, data.email.lower().strip())
+    try:
+        result = (
+            supabase_client.table("reel_unlocks")
+            .select("drop_token")
+            .eq("reel_id", data.reel_id)
+            .eq("viewer_email", data.email.lower().strip())
+            .eq("unlock_type", "paid")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+    except Exception as e:
+        logger.error("restore-access Supabase query failed | reel_id=%s error=%s", data.reel_id, e, exc_info=True)
+        raise HTTPException(status_code=502, detail="Could not query unlock records")
+
     if result.data:
+        logger.info("restore-access found unlock | reel_id=%s", data.reel_id)
         return {"unlocked": True, "drop_token": result.data[0]["drop_token"]}
+    logger.info("restore-access no unlock found | reel_id=%s email=%s", data.reel_id, data.email.lower().strip())
     return {"unlocked": False}
 
 
@@ -129,7 +155,8 @@ async def verify_password(data: VerifyPasswordRequest):
             .single()
             .execute()
         )
-    except Exception:
+    except Exception as e:
+        logger.error("verify-password Supabase query failed | reel_id=%s error=%s", reel_id, e, exc_info=True)
         raise HTTPException(status_code=502, detail="Could not fetch reel password")
 
     reel = res.data or {}
@@ -145,7 +172,8 @@ async def verify_password(data: VerifyPasswordRequest):
 
     try:
         ok = bcrypt.checkpw(password.encode(), hashed.encode())
-    except Exception:
+    except Exception as e:
+        logger.warning("bcrypt.checkpw failed | reel_id=%s error=%s", reel_id, e)
         ok = False
 
     return {"success": bool(ok)}
