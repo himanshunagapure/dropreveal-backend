@@ -5,13 +5,16 @@ from services import drop_service
 
 router = APIRouter()
 
+
 @router.get("/drop")
-async def get_drop(token: str, db: Session = Depends(get_db)):
+async def get_drop(token: str, reel_id: str | None = None, db: Session = Depends(get_db)):
     if not token:
         raise HTTPException(status_code=400, detail="Token is required")
-        
-    is_valid = drop_service.verify_token(db, token)
-    if not is_valid:
+
+    resolved = drop_service.resolve_reel_id(db, token)
+    if not resolved:
         raise HTTPException(status_code=403, detail="Invalid or expired token")
-        
-    return drop_service.get_drop_content()
+    if reel_id and reel_id.strip() != resolved:
+        raise HTTPException(status_code=403, detail="Invalid or expired token")
+
+    return drop_service.get_reel_content(resolved)

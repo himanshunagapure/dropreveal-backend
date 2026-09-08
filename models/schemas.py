@@ -23,3 +23,14 @@ class RestoreAccessRequest(BaseModel):
 class VerifyPasswordRequest(BaseModel):
     reel_id: str
     password: str
+
+
+class StartAdSessionRequest(BaseModel):
+    reel_id: str
+    viewer_id: str
+
+
+class AdSessionActionRequest(BaseModel):
+    session_id: str
+    viewer_id: str
+    duration_sec: float | None = None

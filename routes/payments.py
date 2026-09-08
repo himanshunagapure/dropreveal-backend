@@ -176,4 +176,19 @@ async def verify_password(data: VerifyPasswordRequest):
         logger.warning("bcrypt.checkpw failed | reel_id=%s error=%s", reel_id, e)
         ok = False
 
-    return {"success": bool(ok)}
+    if not ok:
+        return {"success": False}
+
+    try:
+        drop_token = drop_service.issue_unlock_token(reel_id, "password")
+        content = drop_service.get_reel_content(reel_id)
+    except Exception as e:
+        logger.error("password unlock token failed | reel_id=%s error=%s", reel_id, e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Password correct but unlock failed")
+
+    return {
+        "success": True,
+        "drop_token": drop_token,
+        "prompt": content["prompt"],
+        "files": content["files"],
+    }

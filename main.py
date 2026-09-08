@@ -1,7 +1,7 @@
 import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import orders, payments, webhooks, drop, payouts
+from routes import orders, payments, webhooks, drop, payouts, ads
 from config import FRONTEND_URL
 
 logging.basicConfig(
@@ -25,6 +25,7 @@ app.include_router(payments.router, tags=["Payments"])
 app.include_router(webhooks.router, tags=["Webhooks"])
 app.include_router(drop.router, tags=["Drop"])
 app.include_router(payouts.router, tags=["Payouts"])
+app.include_router(ads.router, tags=["Ads"])
 
 @app.get("/")
 async def root():

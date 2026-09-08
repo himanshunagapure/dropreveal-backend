@@ -37,6 +37,20 @@ class DropToken(Base):
     used = Column(Boolean, default=False)
     expires_at = Column(DateTime)
 
+
+class AdSession(Base):
+    __tablename__ = "ad_sessions"
+
+    id = Column(String, primary_key=True)
+    reel_id = Column(String, index=True)
+    viewer_id = Column(String, index=True)
+    ads_required = Column(Integer)
+    completed = Column(Integer, default=0)
+    play_started_at = Column(DateTime, nullable=True)
+    unlocked = Column(Boolean, default=False)
+    drop_token = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 Base.metadata.create_all(bind=engine)
 
 def get_db():
